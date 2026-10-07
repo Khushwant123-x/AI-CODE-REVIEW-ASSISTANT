@@ -1,0 +1,43 @@
+# ── Python ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+pip-wheel-metadata/
+*.pytest_cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Environment variables (NEVER commit) ────────────────
+.env
+backend/.env
+frontend/.env
+
+# ── Node / frontend ──────────────────────────────────────
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# ── OS ──────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+
+# ── IDE ──────────────────────────────────────────────────
+.idea/
+.vscode/
+*.code-workspace
+
+# ── Logs ─────────────────────────────────────────────────
+*.log

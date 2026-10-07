@@ -1,0 +1,76 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  code-review:
+    name: Run AI Code Review
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Start FastAPI backend
+        working-directory: backend
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_MODEL:   ${{ secrets.GROQ_MODEL || 'llama3-70b-8192' }}
+          MAX_CHUNK_LINES: "300"
+        run: |
+          uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+          # Wait for the server to be ready
+          for i in $(seq 1 15); do
+            if curl -sf http://localhost:8000/health; then
+              echo "Backend is ready"
+              break
+            fi
+            echo "Waiting for backend... ($i/15)"
+            sleep 2
+          done
+
+      - name: Trigger AI code review
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL || 'http://localhost:8000' }}
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          OWNER=${{ github.repository_owner }}
+          REPO=${{ github.event.repository.name }}
+
+          echo "Reviewing PR #${PR_NUMBER} in ${OWNER}/${REPO}"
+
+          RESPONSE=$(curl -sf -X POST "${BACKEND_URL}/review" \
+            -H "Content-Type: application/json" \
+            -d "{\"owner\": \"${OWNER}\", \"repo\": \"${REPO}\", \"pr_number\": ${PR_NUMBER}}" \
+          )
+
+          echo "Review response:"
+          echo "$RESPONSE" | python3 -m json.tool || echo "$RESPONSE"
+
+          # Extract summary values for the step summary
+          FILES=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('files_reviewed',0))")
+          ISSUES=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('issues_found',0))")
+          POSTED=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('comments_posted',0))")
+
+          echo "### AI Code Review Complete" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Files reviewed | ${FILES} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Issues found   | ${ISSUES} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Comments posted | ${POSTED} |" >> $GITHUB_STEP_SUMMARY
