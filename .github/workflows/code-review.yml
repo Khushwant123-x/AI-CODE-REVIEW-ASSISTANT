@@ -55,18 +55,31 @@ jobs:
 
           echo "Reviewing PR #${PR_NUMBER} in ${OWNER}/${REPO}"
 
-          RESPONSE=$(curl -sf -X POST "${BACKEND_URL}/review" \
+          # Call /review, write response body to response.json, and capture HTTP status code
+          HTTP_STATUS=$(curl -s -o response.json -w "%{http_code}" -X POST "${BACKEND_URL}/review" \
             -H "Content-Type: application/json" \
             -d "{\"owner\": \"${OWNER}\", \"repo\": \"${REPO}\", \"pr_number\": ${PR_NUMBER}}" \
           )
 
-          echo "Review response:"
-          echo "$RESPONSE" | python3 -m json.tool || echo "$RESPONSE"
+          echo "HTTP Status Code: ${HTTP_STATUS}"
+          echo "Response Body:"
+          if [ -s response.json ]; then
+            python3 -m json.tool response.json 2>/dev/null || cat response.json
+            echo ""
+          else
+            echo "<empty response body>"
+          fi
+
+          # Fail workflow if HTTP status is not 2xx
+          if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
+            echo "Error: Backend returned non-2xx HTTP status: ${HTTP_STATUS}"
+            exit 1
+          fi
 
           # Extract summary values for the step summary
-          FILES=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('files_reviewed',0))")
-          ISSUES=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('issues_found',0))")
-          POSTED=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('comments_posted',0))")
+          FILES=$(python3 -c "import json; d=json.load(open('response.json')); print(d.get('files_reviewed',0))")
+          ISSUES=$(python3 -c "import json; d=json.load(open('response.json')); print(d.get('issues_found',0))")
+          POSTED=$(python3 -c "import json; d=json.load(open('response.json')); print(d.get('comments_posted',0))")
 
           echo "### AI Code Review Complete" >> $GITHUB_STEP_SUMMARY
           echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
