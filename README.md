@@ -284,3 +284,5 @@ No real API keys are needed – all external calls are mocked.
 3. **Context window** – very long individual files are chunked, but the model may lose cross-file context.
 4. **Line numbers** – the diff position map covers added lines; removed-line comments use general PR comments.
 5. **No authentication** – the FastAPI backend has no auth layer (suitable for local use; add auth before exposing publicly).
+#   A I - C O D E - R E V I E W - A S S I S T A N T  
+ 
