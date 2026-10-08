@@ -12,6 +12,14 @@ class ReviewRequest(BaseModel):
     owner: str = Field(..., description="GitHub repository owner / org")
     repo: str = Field(..., description="GitHub repository name")
     pr_number: int = Field(..., gt=0, description="Pull-request number")
+    github_token: Optional[str] = Field(None, description="Optional GitHub token for private repositories or authenticated actions")
+
+
+# ── GitHub Auth ───────────────────────────────────────────────────────────────
+
+class GitHubVerifyRequest(BaseModel):
+    token: str = Field(..., description="GitHub Personal Access Token")
+
 
 
 # ── Diff / parsing ────────────────────────────────────────────────────────────

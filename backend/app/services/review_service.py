@@ -20,17 +20,17 @@ from app.services.validator import validate_issues
 logger = logging.getLogger(__name__)
 
 
-async def run_review(owner: str, repo: str, pr_number: int) -> ReviewResponse:
+async def run_review(owner: str, repo: str, pr_number: int, token: str | None = None) -> ReviewResponse:
     """End-to-end PR review orchestration."""
 
     # ── 1. Fetch PR metadata ──────────────────────────────────────────────
     logger.info("Fetching PR metadata: %s/%s#%s", owner, repo, pr_number)
-    metadata   = await fetch_pr_metadata(owner, repo, pr_number)
+    metadata   = await fetch_pr_metadata(owner, repo, pr_number, token=token)
     commit_sha = metadata.get("head", {}).get("sha", "")
 
     # ── 2. Fetch diff ─────────────────────────────────────────────────────
     logger.info("Fetching PR diff")
-    raw_diff = await fetch_pr_diff(owner, repo, pr_number)
+    raw_diff = await fetch_pr_diff(owner, repo, pr_number, token=token)
 
     if not raw_diff.strip():
         logger.warning("Empty diff received – nothing to review")
@@ -78,7 +78,7 @@ async def run_review(owner: str, repo: str, pr_number: int) -> ReviewResponse:
     comments_posted = 0
     if commit_sha and final:
         comments_posted = await post_review_comments(
-            owner, repo, pr_number, commit_sha, final, diff_pos_map
+            owner, repo, pr_number, commit_sha, final, diff_pos_map, token=token
         )
 
     return ReviewResponse(

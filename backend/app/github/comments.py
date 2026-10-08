@@ -31,14 +31,14 @@ _TYPE_LABEL = {
 }
 
 
-def _headers() -> dict[str, str]:
-    token = get_settings().github_token
+def _headers(token: str | None = None) -> dict[str, str]:
+    tok = token or get_settings().github_token
     h = {
         "Accept": "application/vnd.github.v3+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    if token:
-        h["Authorization"] = f"Bearer {token}"
+    if tok:
+        h["Authorization"] = f"Bearer {tok}"
     return h
 
 
@@ -61,6 +61,7 @@ async def post_review_comments(
     commit_sha: str,
     issues: list[ReviewIssue],
     diff_position_map: dict[tuple[str, int], int],
+    token: str | None = None,
 ) -> int:
     """
     Post review comments for each issue.
@@ -70,8 +71,9 @@ async def post_review_comments(
 
     Returns the number of comments successfully posted.
     """
-    if not get_settings().github_token:
-        logger.info("No GITHUB_TOKEN configured; skipping posting review comments to GitHub.")
+    active_token = token or get_settings().github_token
+    if not active_token:
+        logger.info("No GitHub token provided; skipping posting review comments to GitHub.")
         return 0
 
     posted = 0
@@ -91,7 +93,7 @@ async def post_review_comments(
                     "path":      issue.file,
                     "position":  position,
                 }
-                resp = await client.post(url, json=payload, headers=_headers())
+                resp = await client.post(url, json=payload, headers=_headers(active_token))
                 if resp.status_code in (200, 201):
                     posted += 1
                     logger.info("Line-level comment posted for %s:%s", issue.file, issue.line)
@@ -108,7 +110,7 @@ async def post_review_comments(
             )
             url  = f"{_BASE}/repos/{owner}/{repo}/issues/{pr_number}/comments"
             resp = await client.post(
-                url, json={"body": fallback_body}, headers=_headers()
+                url, json={"body": fallback_body}, headers=_headers(active_token)
             )
             if resp.status_code in (200, 201):
                 posted += 1

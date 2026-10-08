@@ -1,263 +1,275 @@
-import { useState, useEffect, useMemo } from 'react'
-import Header       from './components/Header.jsx'
-import PRInputPanel from './components/PRInputPanel.jsx'
-import SummaryCards from './components/SummaryCards.jsx'
-import FilterBar    from './components/FilterBar.jsx'
-import IssueList    from './components/IssueList.jsx'
-import FileSidebar  from './components/FileSidebar.jsx'
-import LoadingState from './components/LoadingState.jsx'
-import { reviewPullRequest, checkHealth } from './services/api.js'
+import React, { useState, useEffect } from 'react'
+import Navbar from './components/Navbar.jsx'
+import Sidebar from './components/Sidebar.jsx'
+import GitHubAuthModal from './components/GitHubAuthModal.jsx'
+import DashboardPage from './pages/DashboardPage.jsx'
+import RepositoriesPage from './pages/RepositoriesPage.jsx'
+import PullRequestsPage from './pages/PullRequestsPage.jsx'
+import ReviewResultsPage from './pages/ReviewResultsPage.jsx'
+import ReviewHistoryPage from './pages/ReviewHistoryPage.jsx'
+import SettingsPage from './pages/SettingsPage.jsx'
+
+import {
+  checkHealth,
+  reviewPullRequest,
+  getDemoReview,
+} from './services/api.js'
+import {
+  getStoredTheme,
+  saveStoredTheme,
+  getReviewHistory,
+  recordReviewInHistory,
+  getAllRepositories,
+  addCustomRepository,
+} from './services/storage.js'
+import {
+  getStoredAuthUser,
+  logoutGitHub,
+  fetchAuthenticatedUserRepos,
+} from './services/githubAuth.js'
 
 export default function App() {
-  const [systemReady,     setSystemReady]     = useState(false)
-  const [loading,         setLoading]         = useState(false)
-  const [result,          setResult]          = useState(null)
-  const [error,           setError]           = useState(null)
-  const [severityFilter,  setSeverityFilter]  = useState('All')
-  const [typeFilter,      setTypeFilter]      = useState(null)
-  const [activeFile,      setActiveFile]      = useState(null)
+  const [currentView, setCurrentView] = useState('dashboard')
+  const [theme, setTheme] = useState(getStoredTheme())
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  
+  // GitHub Authentication
+  const [authUser, setAuthUser] = useState(getStoredAuthUser())
+  const [authModalOpen, setAuthModalOpen] = useState(false)
 
-  // ── Health check on mount ────────────────────────────────────────
+  // System & backend status
+  const [systemHealth, setSystemHealth] = useState({ online: false, groq_model: 'llama3-70b-8192' })
+
+  // Active review result
+  const [reviewResult, setReviewResult] = useState(null)
+  const [loadingReview, setLoadingReview] = useState(false)
+  const [reviewError, setReviewError] = useState(null)
+
+  // Repositories & selected repo
+  const [repositories, setRepositories] = useState(getAllRepositories())
+  const [selectedRepo, setSelectedRepo] = useState(repositories[0])
+
+  // Review history
+  const [reviewHistory, setReviewHistory] = useState(getReviewHistory())
+
+  // Apply theme to document
   useEffect(() => {
-    checkHealth()
-      .then(() => setSystemReady(true))
-      .catch(() => setSystemReady(false))
+    document.documentElement.setAttribute('data-theme', theme)
+    saveStoredTheme(theme)
+  }, [theme])
+
+  // Health check on startup & periodic poll
+  useEffect(() => {
+    const doHealthCheck = () => {
+      checkHealth()
+        .then((health) => setSystemHealth(health))
+        .catch(() => setSystemHealth({ online: false }))
+    }
+    doHealthCheck()
+    const timer = setInterval(doHealthCheck, 30000)
+    return () => clearInterval(timer)
   }, [])
 
-  // ── Submit handler ───────────────────────────────────────────────
-  async function handleReview(owner, repo, prNumber) {
-    setLoading(true)
-    setError(null)
-    setResult(null)
-    setSeverityFilter('All')
-    setTypeFilter(null)
-    setActiveFile(null)
+  // Auto-sync repos if authenticated user exists on startup
+  useEffect(() => {
+    if (authUser) {
+      handleSyncUserRepos(false)
+    }
+  }, [])
 
+  const handleToggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))
+  }
+
+  // GitHub Auth Handlers
+  const handleAuthSuccess = (user) => {
+    setAuthUser(user)
+    handleSyncUserRepos(true)
+  }
+
+  const handleLogout = () => {
+    logoutGitHub()
+    setAuthUser(null)
+  }
+
+  const handleSyncUserRepos = async (shouldSelectFirst = false) => {
     try {
-      const data = await reviewPullRequest(owner, repo, prNumber)
-      setResult(data)
+      const userRepos = await fetchAuthenticatedUserRepos()
+      if (userRepos && userRepos.length > 0) {
+        // Merge with existing
+        const existingMap = new Map(getAllRepositories().map((r) => [r.fullName.toLowerCase(), r]))
+        userRepos.forEach((r) => {
+          existingMap.set(r.fullName.toLowerCase(), r)
+        })
+        const merged = Array.from(existingMap.values())
+        setRepositories(merged)
+        localStorage.setItem('ai_code_review_custom_repos', JSON.stringify(merged))
+
+        if (shouldSelectFirst && userRepos[0]) {
+          setSelectedRepo(userRepos[0])
+        }
+      }
     } catch (err) {
-      setError(err.message || 'An unexpected error occurred.')
-    } finally {
-      setLoading(false)
+      console.warn('Could not sync user repos:', err)
     }
   }
 
-  const [copied, setCopied] = useState(false)
+  // Core review trigger: Works for ANY owner, repo, and PR number
+  const handleRunReview = async (owner, repo, prNumber) => {
+    setLoadingReview(true)
+    setReviewError(null)
+    setCurrentView('pull-requests')
 
-  // ── Demo review loader ───────────────────────────────────────────
-  function handleDemo() {
-    setError(null)
-    setSeverityFilter('All')
-    setTypeFilter(null)
-    setActiveFile(null)
-    setResult({
-      status: 'success',
-      pr_number: 42,
-      files_reviewed: 3,
-      issues_found: 4,
-      comments_posted: 0,
-      issues: [
-        {
-          file: 'backend/app/auth/security.py',
-          line: 45,
-          severity: 'Critical',
-          issue_type: 'security',
-          title: 'Hardcoded JWT secret key allows signature forgery',
-          explanation: 'The HMAC secret key is hardcoded as a fallback string literal in the source code. Anyone with access to the repository can forge arbitrary authentication tokens with elevated admin claims.',
-          suggestion: 'Fetch the secret strictly from an environment variable and fail fast on startup if unset:\nsecret = os.environ["JWT_SECRET_KEY"]'
-        },
-        {
-          file: 'backend/app/api/users.py',
-          line: 112,
-          severity: 'Warning',
-          issue_type: 'bug',
-          title: 'Uncaught AttributeError on optional user profile avatar',
-          explanation: 'Accessing user.profile.avatar_url directly will raise an AttributeError when profile is None for newly registered accounts or external OAuth users.',
-          suggestion: 'Use safe traversal or getattr:\navatar_url = user.profile.avatar_url if user.profile else None'
-        },
-        {
-          file: 'backend/app/db/repositories.py',
-          line: 78,
-          severity: 'Warning',
-          issue_type: 'performance',
-          title: 'N+1 database query inside serialization loop',
-          explanation: 'Querying user permissions inside the loop generates N individual SQL queries, which causes excessive database roundtrips and degrades response latency under load.',
-          suggestion: 'Use joinedload or selectinload in the initial database query:\nquery = select(User).options(selectinload(User.permissions))'
-        },
-        {
-          file: 'backend/app/auth/security.py',
-          line: 94,
-          severity: 'Info',
-          issue_type: 'maintainability',
-          title: 'Missing type annotations and docstring on public helper',
-          explanation: 'Function verify_token_payload lacks return type annotations and docstring describing accepted claims and expiry rules.',
-          suggestion: 'Add clear type annotations:\ndef verify_token_payload(payload: dict[str, Any]) -> TokenData:'
-        }
-      ]
-    })
+    // Automatically ensure this repository is in user's saved repository list
+    const { all } = addCustomRepository(owner, repo)
+    setRepositories(all)
+
+    try {
+      const data = await reviewPullRequest(owner, repo, prNumber)
+      setReviewResult(data)
+      const updatedHistory = recordReviewInHistory(data, owner, repo, prNumber)
+      setReviewHistory(updatedHistory)
+      setCurrentView('reviews')
+    } catch (err) {
+      console.warn('Real review error:', err)
+      setReviewError(
+        `${err.message || 'Unable to review PR'}. Please ensure the repository is accessible and GROQ_API_KEY is configured in the backend.`
+      )
+    } finally {
+      setLoadingReview(false)
+    }
   }
 
-  function handleCopyMarkdown() {
-    if (!result) return
-    const lines = [
-      `# 🤖 AI Code Review Summary - PR #${result.pr_number}`,
-      ``,
-      `| Metric | Count |`,
-      `| --- | --- |`,
-      `| **Files Reviewed** | ${result.files_reviewed} |`,
-      `| **Issues Found** | ${result.issues_found} |`,
-      `| **Comments Posted** | ${result.comments_posted} |`,
-      ``,
-      `## Detailed Findings`,
-      ``,
-      ...result.issues.map(
-        (iss, i) =>
-          `### ${i + 1}. [${iss.severity}] ${iss.title}\n` +
-          `- **File:** \`${iss.file}\` (Line ${iss.line})\n` +
-          `- **Type:** \`${iss.issue_type}\`\n` +
-          `- **Explanation:** ${iss.explanation}\n` +
-          `- **Suggestion:**\n\`\`\`\n${iss.suggestion}\n\`\`\`\n`
-      ),
-      `---\n*Generated by AI Code Review Assistant (Groq LLM)*`
-    ]
-    navigator.clipboard.writeText(lines.join('\n'))
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2500)
+  // Handle reviewing ANY PR URL directly from Navbar or quick bar
+  const handleReviewAnyUrl = (url) => {
+    const match = url.trim().match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/i)
+    if (match) {
+      const owner = match[1]
+      const repo = match[2]
+      const prNumber = parseInt(match[3], 10)
+      handleRunReview(owner, repo, prNumber)
+    } else {
+      setReviewError('Invalid GitHub PR URL. Format must be: https://github.com/owner/repository/pull/number')
+      setCurrentView('pull-requests')
+    }
   }
 
-  // ── Filtered issues ──────────────────────────────────────────────
-  const filteredIssues = useMemo(() => {
-    if (!result) return []
-    return result.issues.filter(issue => {
-      if (severityFilter !== 'All' && issue.severity !== severityFilter) return false
-      if (typeFilter && issue.issue_type !== typeFilter) return false
-      if (activeFile && issue.file !== activeFile) return false
-      return true
-    })
-  }, [result, severityFilter, typeFilter, activeFile])
+  // Open existing review from History or Dashboard
+  const handleOpenExistingReview = (item) => {
+    if (item.resultData) {
+      setReviewResult(item.resultData)
+    } else {
+      const demo = getDemoReview()
+      setReviewResult(demo)
+    }
+    setCurrentView('reviews')
+  }
 
-  // ── Files in result ──────────────────────────────────────────────
-  const files = useMemo(() => {
-    if (!result) return []
-    // Build from parsed files list if available
-    const fromIssues = [...new Set(result.issues.map(i => i.file))]
-    return fromIssues
-  }, [result])
+  const handleSelectRepo = (repo) => {
+    setSelectedRepo(repo)
+    setCurrentView('pull-requests')
+  }
 
   return (
-    <div className="app">
-      <Header systemReady={systemReady} />
+    <div className="app-root">
+      <Navbar
+        systemHealth={systemHealth}
+        currentView={currentView}
+        onNavigate={setCurrentView}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
+        onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+        onReviewAnyUrl={handleReviewAnyUrl}
+        authUser={authUser}
+        onOpenAuthModal={() => setAuthModalOpen(true)}
+        onLogout={handleLogout}
+        onSyncRepos={handleSyncUserRepos}
+      />
 
-      <main className="main">
-        <div className="container">
+      <div className="app-body">
+        <Sidebar
+          currentView={currentView}
+          onNavigate={setCurrentView}
+          hasActiveReview={Boolean(reviewResult)}
+          activeReviewCount={reviewResult?.issues_found || 0}
+          isOpen={sidebarOpen}
+          onCloseMobile={() => setSidebarOpen(false)}
+          selectedRepo={selectedRepo}
+        />
 
-          {/* ── Error banner ───────────────────────────────────── */}
-          {error && (
-            <div className="error-state" role="alert">
-              <span className="error-icon">⛔</span>
-              <div>
-                <div className="error-title">Review Failed</div>
-                <div className="error-message">{error}</div>
-              </div>
-            </div>
+        <main className="app-main-content">
+          {currentView === 'dashboard' && (
+            <DashboardPage
+              reviewHistory={reviewHistory}
+              onOpenReview={handleOpenExistingReview}
+              onNavigate={setCurrentView}
+              authUser={authUser}
+              onOpenAuthModal={() => setAuthModalOpen(true)}
+            />
           )}
 
-          <div className="page-layout">
-            {/* ── Left sidebar ─────────────────────────────────── */}
-            <aside style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <PRInputPanel onSubmit={handleReview} onDemo={handleDemo} loading={loading} />
+          {currentView === 'repositories' && (
+            <RepositoriesPage
+              onSelectRepo={handleSelectRepo}
+              onNavigate={setCurrentView}
+              authUser={authUser}
+              onOpenAuthModal={() => setAuthModalOpen(true)}
+              onSyncRepos={handleSyncUserRepos}
+            />
+          )}
 
-              {result && (
-                <FileSidebar
-                  files={files}
-                  issues={result.issues}
-                  activeFile={activeFile}
-                  onFileClick={setActiveFile}
-                />
-              )}
+          {currentView === 'pull-requests' && (
+            <PullRequestsPage
+              selectedRepo={selectedRepo}
+              onRunReview={handleRunReview}
+              loading={loadingReview}
+              error={reviewError}
+              onClearError={() => setReviewError(null)}
+              onOpenExistingReview={() => setCurrentView('reviews')}
+              onSwitchRepo={handleSelectRepo}
+              authUser={authUser}
+              onOpenAuthModal={() => setAuthModalOpen(true)}
+            />
+          )}
 
-              {!result && !loading && !error && (
-                <div className="panel">
-                  <div className="panel-body">
-                    <div className="empty-state" style={{ padding: '24px 0' }}>
-                      <div className="empty-state-icon">📋</div>
-                      <div className="empty-state-title">No review yet</div>
-                      <div className="empty-state-description">
-                        Enter a GitHub repository and Pull Request number, or click <strong>Load Demo</strong> to preview findings.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </aside>
+          {currentView === 'reviews' && (
+            <ReviewResultsPage
+              reviewResult={reviewResult}
+              onRerunReview={handleRunReview}
+              onNavigate={setCurrentView}
+            />
+          )}
 
-            {/* ── Main content ──────────────────────────────────── */}
-            <section>
-              {loading && <LoadingState />}
+          {currentView === 'history' && (
+            <ReviewHistoryPage
+              reviewHistory={reviewHistory}
+              onOpenReview={handleOpenExistingReview}
+              onHistoryUpdated={setReviewHistory}
+              onNavigate={setCurrentView}
+            />
+          )}
 
-              {!loading && result && (
-                <>
-                  <SummaryCards result={result} />
+          {currentView === 'settings' && (
+            <SettingsPage
+              systemHealth={systemHealth}
+              onHealthUpdated={setSystemHealth}
+              authUser={authUser}
+              onOpenAuthModal={() => setAuthModalOpen(true)}
+              onLogout={handleLogout}
+            />
+          )}
+        </main>
+      </div>
 
-                  <FilterBar
-                    severityFilter={severityFilter}
-                    typeFilter={typeFilter}
-                    onSeverity={setSeverityFilter}
-                    onType={setTypeFilter}
-                  />
-
-                  <div className="section-header">
-                    <h1 className="section-title">
-                      Review Findings
-                      {activeFile && (
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginLeft: 8, fontWeight: 400 }}>
-                          · {activeFile.split('/').pop()}
-                        </span>
-                      )}
-                    </h1>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <button
-                        className="btn btn-secondary"
-                        style={{ fontSize: '0.75rem', padding: '4px 10px' }}
-                        onClick={handleCopyMarkdown}
-                        title="Copy full review report as Markdown"
-                      >
-                        {copied ? '✓ Copied Markdown!' : '📋 Copy Report'}
-                      </button>
-                      <span className="section-count">{filteredIssues.length} issue{filteredIssues.length !== 1 ? 's' : ''}</span>
-                    </div>
-                  </div>
-
-                  {result.issues_found === 0 ? (
-                    <div className="no-issues">
-                      <div className="no-issues-icon">✅</div>
-                      <div className="no-issues-text">
-                        No issues found — this PR looks clean!
-                      </div>
-                    </div>
-                  ) : (
-                    <IssueList issues={filteredIssues} />
-                  )}
-                </>
-              )}
-
-              {!loading && !result && !error && (
-                <div className="empty-state">
-                  <div className="empty-state-icon">🔍</div>
-                  <div className="empty-state-title">Ready to review</div>
-                  <div className="empty-state-description">
-                    Fill in the form on the left with a GitHub owner, repository name,
-                    and pull request number, then click <strong>Review Pull Request</strong> to
-                    start the AI-powered analysis.
-                  </div>
-                </div>
-              )}
-            </section>
-          </div>
-
-        </div>
-      </main>
+      {/* GitHub Authentication Dialog */}
+      <GitHubAuthModal
+        isOpen={authModalOpen}
+        onClose={() => setAuthModalOpen(false)}
+        authUser={authUser}
+        onAuthSuccess={handleAuthSuccess}
+        onLogout={handleLogout}
+        onSyncRepos={handleSyncUserRepos}
+      />
     </div>
   )
 }

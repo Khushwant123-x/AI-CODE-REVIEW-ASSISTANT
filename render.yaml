@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: ai-code-review-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GROQ_MODEL
+        value: llama3-70b-8192
+      - key: MAX_CHUNK_LINES
+        value: "300"
