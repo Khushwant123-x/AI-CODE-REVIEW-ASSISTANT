@@ -38,7 +38,7 @@ export default function App() {
   const [authModalOpen, setAuthModalOpen] = useState(false)
 
   // System & backend status
-  const [systemHealth, setSystemHealth] = useState({ online: false, groq_model: 'llama3-70b-8192' })
+  const [systemHealth, setSystemHealth] = useState({ online: false, groq_model: 'openai/gpt-oss-120b' })
 
   // Active review result
   const [reviewResult, setReviewResult] = useState(null)

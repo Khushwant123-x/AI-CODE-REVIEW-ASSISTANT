@@ -13,11 +13,11 @@ import {
 import { getAllRepositories } from './storage.js'
 import { getStoredAuthToken, fetchRepoPullRequestsWithAuth } from './githubAuth.js'
 
+const DEFAULT_ONLINE_API = 'https://ai-code-review-assistant-xica.onrender.com'
 let customApiUrl = localStorage.getItem('ai_code_review_api_url') || ''
-const BASE_URL = customApiUrl || import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 export function getApiBaseUrl() {
-  return customApiUrl || import.meta.env.VITE_API_URL || 'http://localhost:8000'
+  return customApiUrl || import.meta.env.VITE_API_URL || DEFAULT_ONLINE_API
 }
 
 export function setApiBaseUrl(url) {

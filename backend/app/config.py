@@ -19,7 +19,7 @@ class Settings(BaseSettings):
 
     # Groq
     groq_api_key: str = ""
-    groq_model: str = "llama3-70b-8192"
+    groq_model: str = "openai/gpt-oss-120b"
 
     # Chunking
     max_chunk_lines: int = 300

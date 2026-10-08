@@ -11,6 +11,6 @@ services:
       - key: GITHUB_TOKEN
         sync: false
       - key: GROQ_MODEL
-        value: llama3-70b-8192
+        value: openai/gpt-oss-120b
       - key: MAX_CHUNK_LINES
         value: "300"
