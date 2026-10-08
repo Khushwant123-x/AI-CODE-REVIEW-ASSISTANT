@@ -1,0 +1,43 @@
+warning: in the working copy of '.github/workflows/code-review.yml', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/.github/workflows/code-review.yml b/.github/workflows/code-review.yml[m
+[1mindex 5946d14..4729dd3 100644[m
+[1m--- a/.github/workflows/code-review.yml[m
+[1m+++ b/.github/workflows/code-review.yml[m
+[36m@@ -55,18 +55,31 @@[m [mjobs:[m
+ [m
+           echo "Reviewing PR #${PR_NUMBER} in ${OWNER}/${REPO}"[m
+ [m
+[31m-          RESPONSE=$(curl -sf -X POST "${BACKEND_URL}/review" \[m
+[32m+[m[32m          # Call /review, write response body to response.json, and capture HTTP status code[m
+[32m+[m[32m          HTTP_STATUS=$(curl -s -o response.json -w "%{http_code}" -X POST "${BACKEND_URL}/review" \[m
+             -H "Content-Type: application/json" \[m
+             -d "{\"owner\": \"${OWNER}\", \"repo\": \"${REPO}\", \"pr_number\": ${PR_NUMBER}}" \[m
+           )[m
+ [m
+[31m-          echo "Review response:"[m
+[31m-          echo "$RESPONSE" | python3 -m json.tool || echo "$RESPONSE"[m
+[32m+[m[32m          echo "HTTP Status Code: ${HTTP_STATUS}"[m
+[32m+[m[32m          echo "Response Body:"[m
+[32m+[m[32m          if [ -s response.json ]; then[m
+[32m+[m[32m            python3 -m json.tool response.json 2>/dev/null || cat response.json[m
+[32m+[m[32m            echo ""[m
+[32m+[m[32m          else[m
+[32m+[m[32m            echo "<empty response body>"[m
+[32m+[m[32m          fi[m
+[32m+[m
+[32m+[m[32m          # Fail workflow if HTTP status is not 2xx[m
+[32m+[m[32m          if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then[m
+[32m+[m[32m            echo "Error: Backend returned non-2xx HTTP status: ${HTTP_STATUS}"[m
+[32m+[m[32m            exit 1[m
+[32m+[m[32m          fi[m
+ [m
+           # Extract summary values for the step summary[m
+[31m-          FILES=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('files_reviewed',0))")[m
+[31m-          ISSUES=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('issues_found',0))")[m
+[31m-          POSTED=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('comments_posted',0))")[m
+[32m+[m[32m          FILES=$(python3 -c "import json; d=json.load(open('response.json')); print(d.get('files_reviewed',0))")[m
+[32m+[m[32m          ISSUES=$(python3 -c "import json; d=json.load(open('response.json')); print(d.get('issues_found',0))")[m
+[32m+[m[32m          POSTED=$(python3 -c "import json; d=json.load(open('response.json')); print(d.get('comments_posted',0))")[m
+ [m
+           echo "### AI Code Review Complete" >> $GITHUB_STEP_SUMMARY[m
+           echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY[m
